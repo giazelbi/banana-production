@@ -1,0 +1,7 @@
+
+data/
+__pycache__/
+to_be_updated/
+
+.DS_Store
+*.ipynb
