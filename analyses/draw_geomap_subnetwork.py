@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
-DATA_PATH = './data'
+DATA_PATH = '../data'
 print(os.getcwd())
 
 # ============================ Load shapefiles ================================
@@ -32,18 +32,15 @@ cantons_gdf[['ADM2_ES','ADM1_ES']] = cantons_gdf_goodnames
 
 SECTOR='A0122' # 'A0122' ''
 CONTR_TYPE = 'sociedades' #'personas' # 'sociedades' # 'all'
-firm_df = pd.read_csv(f'{DATA_PATH}/firm-level/nodelist_{SECTOR}{CONTR_TYPE}2015.csv', sep='\t',
+firm_df = pd.read_csv(f'{DATA_PATH}/firm-level/nodelist_{SECTOR}{CONTR_TYPE}.csv', sep='\t',
                       dtype={'out_strength':float})
-
-"""
-SECTOR='1st and sub.'
-CONTR_TYPE = 'sociedades'
-firm_df = pd.read_csv('./ec_viz/data/nodelist_NoboaSubsidiariesSectors2015.csv', sep='\t')
-"""
 
 # Lower case for match with shp
 firm_df["province"] = firm_df["province"].str.strip().str.lower()
-firm_df["city"]     = firm_df["city"].str.strip().str.lower()
+firm_df["canton"]     = firm_df["canton"].str.strip().str.lower()
+
+# For the moment, drop years != 2015. Future: expand the geoanalysis to temporal dimension.
+firm_df = firm_df[firm_df['date'] == 2015]
 
 # Remove 'Galápagos' islands?
 SHOW_GALAPAGOS = False
@@ -60,9 +57,9 @@ else:
 # All the provinces and cantones of firm_df_norm are in cantons_gdf_norm.
 firm_counts = (
     firm_df
-    .groupby(["province", "city"])
-    .agg(contr_count=('id','size'),
-         cuml_out_strength = ('out_strength','sum'))
+    .groupby(["province", "canton"])
+    .agg(contr_count=('firm_id','size'),
+         cuml_s_out = ('cw_s_out','sum'))
     .reset_index()
 )
 
@@ -70,7 +67,7 @@ firm_counts = (
 merged_gdf = cantons_gdf_regions_ok.merge(
     firm_counts,
     left_on=["ADM1_ES", "ADM2_ES"],
-    right_on=["province", "city"],
+    right_on=["province", "canton"],
     how="left"
 )
 
@@ -81,16 +78,16 @@ merged_gdf = cantons_gdf_regions_ok.merge(
 # ============================ Plot ================================
 # Compute summary stats
 text_box = [('Total count:   ', int(merged_gdf["contr_count"].sum())),
-            ('Total out str: ', format(merged_gdf["cuml_out_strength"].sum(), ".2e"))]
+            ('Total out str: ', format(merged_gdf["cuml_s_out"].sum(), ".2e"))]
 
 # Plotting
 fig, ax = plt.subplots(nrows=1,ncols=2,figsize=(14, 7))
 ax.flatten()
 LOGSCALE = True
 
-for i, col in enumerate(["contr_count", "cuml_out_strength"]):
+for i, col in enumerate(["contr_count", "cuml_s_out"]):
 
-    # In principle there's no location with element at col = 0
+    # In principle there's no location with element at col = 0... but to be sure:
     data = merged_gdf[col].replace(0, np.nan)  # avoid log(0)
     valid_data = data.dropna()
 
@@ -149,6 +146,6 @@ for i, col in enumerate(["contr_count", "cuml_out_strength"]):
 # Titles and cleanup
 ax[0].set_title("Tax contributor density (2015) by canton \n in continental Ecuador", fontsize=14)
 ax[1].set_title("Tax contributor revenue (2015) by canton \n in continental Ecuador", fontsize=14)
-#plt.savefig(f'./ec_viz/data/figures/gelocated_2015_{SECTOR}{CONTR_TYPE}.png',
-#            format='png', dpi=600)
+plt.savefig(f'../figures/gelocated_2015_{SECTOR}{CONTR_TYPE}.png',
+            format='png', dpi=600)
 plt.show()
