@@ -7,7 +7,6 @@ Loads:
 - Firm nodelist
 """
 
-import os
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import pandas as pd

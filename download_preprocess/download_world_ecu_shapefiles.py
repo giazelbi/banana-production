@@ -5,9 +5,8 @@ This module downloads shape files for Ecuador and the world.
 import os
 import zipfile
 from urllib.request import urlretrieve
-from tqdm import tqdm
 from pathlib import Path
-
+from tqdm import tqdm
 from config import DATA_PATH
 
 def download_with_progress(url, filename):
