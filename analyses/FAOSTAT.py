@@ -164,5 +164,5 @@ if __name__ == "__main__":
     # Load FAOSTAT data
     faostat_df = load_faostat_data()
     fao_dfs = build_fao_dfs(faostat_df)
-    save = True
-    plot_fao_data(fao_dfs, years=(2003, 2020), figsize=(11, 8), save=save)
+    SAVE = True
+    plot_fao_data(fao_dfs, years=(2003, 2020), figsize=(11, 8), save=SAVE)
