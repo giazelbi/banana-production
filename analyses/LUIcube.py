@@ -35,12 +35,12 @@ import rasterio
 import rasterio.mask
 from rasterstats import zonal_stats
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 import numpy as np
 import geopandas as gpd
 import pandas as pd
 
-from config import DATA_PATH, FIGURE_PATH
+from config import (REGION_CONFIG, clean_region_shapefile,
+                    DATA_PATH, FIGURE_PATH)
 
 # ----------------------------------------------------------------------------
 # Logging setup
@@ -49,24 +49,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-
-# ----------------------------------------------------------------------------
-# Region configuration
-# ----------------------------------------------------------------------------
-REGION_CONFIG = {
-    "ecuador": {
-        "path": Path(DATA_PATH) / "geography" / "ecu_adm_2024" / "ecu_adm_adm2_2024.shp",
-        "rename": {"ADM0_ES": "ADM0", "ADM1_ES": "ADM1", "ADM2_ES": "ADM2"},
-        "filter": lambda df: df[df["ADM1"] != "Galápagos"], # filter to remove certain rows
-        "keep": ["ADM0", "ADM1", "ADM2", "geometry"],  # keep only these
-    },
-    "austria": {
-        "path": Path(DATA_PATH) / "geography" / "VGD_Oesterreich_gst_20230403" / "VGD.shp",
-        "rename": {"ST": "ADM0", "BL": "ADM1", "PB": "ADM2"},
-        "filter": lambda df: df[df["ADM1"].isin(["Wien", "Niederösterreich"])],
-        "keep": ["ADM0", "ADM1", "ADM2", "geometry"],
-    },
-}
 
 # ----------------------------------------------------------------------------
 # Raster paths dictionary builder
@@ -144,40 +126,6 @@ def build_raster_path_dict(data_path=DATA_PATH):
                 raster_dict[crop][metric][year] = str(raster_path)
 
     return raster_dict
-
-# ----------------------------------------------------------------------------
-# Shapefile cleaning
-# ----------------------------------------------------------------------------
-
-def clean_region_shapefile(gdf: gpd.GeoDataFrame, region: str) -> gpd.GeoDataFrame:
-    """
-    Clean and standardize shapefile based on region config.
-
-    Args:
-    gdf (GeoDataFrame): Input shapefile
-    region (str): Region key from REGION_CONFIG
-
-    Returns:
-    GeoDataFrame: Cleaned shapefile
-    """
-    cfg = REGION_CONFIG.get(region)
-    if not cfg:
-        raise ValueError(f"Unknown region: {region}")
-
-    gdf = gdf.rename(cfg["rename"], axis=1)
-    gdf = cfg["filter"](gdf)
-    # Dissolve by ADM2 (aggregate shapes that are smaller than ADM2)
-    gdf = gdf.dissolve(by="ADM2").reset_index()
-
-    # Keep only region-specific subset of columns (if defined)
-    if "keep" in cfg:
-        cols = [c for c in cfg["keep"] if c in gdf.columns]
-        # Ensure geometry is last and not duplicated
-        if "geometry" not in cols:
-            cols.append("geometry")
-        gdf = gdf[cols]
-
-    return gdf
 
 # ----------------------------------------------------------------------------
 # Raster visualization
@@ -390,7 +338,7 @@ def plot_temporal_evolution(df, metric, adm_level, ax):
     region = df['ADM0'].unique()[0]
 
     # Get 23 colors from a colormap
-    colors = (plt.cm.tab20.colors + plt.cm.tab20b.colors + plt.cm.tab20c.colors)[:23]# take first 23
+    colors = (plt.cm.tab20.colors + plt.cm.tab20b.colors + plt.cm.tab20c.colors)[:23]# take first 23 # pylint: disable=no-member
 
     # Apply to plot
     pivoted.plot(marker='o', color=colors, ax=ax)
@@ -411,7 +359,7 @@ def plot_temporal_evolution(df, metric, adm_level, ax):
 # ----------------------------------------------------------------------------
 # Stats in year choropleth visualization
 # ----------------------------------------------------------------------------
-def plot_csv_choropleth_in_year(
+def color_polygons_metric_in_year(
     merged_gdf: gpd.GeoDataFrame,
     year: str | int,
     cmap: str = "viridis",
@@ -446,7 +394,7 @@ def plot_csv_choropleth_in_year(
         cmap=cmap,
     )
 
-    ax.set(title=f"Heatmap of {crop} {metric} in {region}, year {year}")
+    ax.set(title=f"{crop} {metric} in {region}, year {year}")
 
     # Colorbar setup
     sm = plt.cm.ScalarMappable(
@@ -473,18 +421,19 @@ if __name__ == "__main__":
     # Choose crop, metric, shapefile
     CROP = 'BANP'
     REGION = 'ecuador'
-    METRIC = 'HANPPharv' #'area'
+    METRIC = 'HANPPharv' #'area' 'HANPPharv'
     UNIT = 'km2' if METRIC == 'area' else 'tC'
 
     geodf = gpd.read_file(REGION_CONFIG[REGION]["path"])
-    geodf = clean_region_shapefile(geodf, REGION)
+    adm2_geodf = clean_region_shapefile(geodf, REGION)
+    adm1_geodf = adm2_geodf.dissolve(by=['ADM0', 'ADM1'], as_index=False)
 
     # --------------------------------------------------------
     # Here I build the csv with the metric aggregated at ADM2
     # --------------------------------------------------------
 
     extract_temporal_zonal_stats(tif_raster_dict,
-                                 geodf,
+                                 adm2_geodf,
                                  REGION, CROP, metrics=[METRIC],
                                  )
 
@@ -513,11 +462,19 @@ if __name__ == "__main__":
     # --------------------------------------------------------
     # GeoSnapshot of metric, aggregated at ADM2
     # --------------------------------------------------------
-    YEAR = 2001
-    # Merge stats with polygons for the given year    
-    gdf_plot = geodf.merge(stats_df[stats_df['year'] == str(YEAR)])
+    YEAR = 2010
+    # Merge stats with polygons for the given year
+    adm2_geogdf_plot = adm2_geodf.merge(stats_df[stats_df['year'] == str(YEAR)],
+                                        how='outer')
 
     fig3, ax3 = plt.subplots(ncols=1, nrows=1, figsize=(6, 6))
-    plot_csv_choropleth_in_year(gdf_plot, YEAR, ax=ax3)
+    color_polygons_metric_in_year(adm2_geogdf_plot, YEAR, ax=ax3)
+
+    # Internal borders
+    adm1_geodf.plot(color='none', edgecolor='yellow',
+                    linewidth=0.1, linestyle='--',
+                    ax=ax3)
     plt.tight_layout()
+    plt.savefig(FIGURE_PATH / f"{REGION}_ADM2_aggregated_{CROP}_{METRIC}_{YEAR}.png",
+                format='png', dpi=600)
     plt.show()
