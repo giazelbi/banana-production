@@ -176,7 +176,7 @@ def plot_raster_within_shape(raster_path: str, gdf: gpd.GeoDataFrame, ax):
     # Calculate pixel sum and add textbox
     pixel_sum = np.nansum(masked_data[0])
     ax.text(
-        0.02, 0.98, f'Total: {pixel_sum:.1f}', transform=ax.transAxes,
+        0.60, 0.1, f'Total: {pixel_sum:.3e}', transform=ax.transAxes,
         fontsize=12, verticalalignment='top',
         bbox={'boxstyle':'round', 'facecolor':'white', 'alpha':0.8}
         )
@@ -421,12 +421,35 @@ if __name__ == "__main__":
     # Choose crop, metric, shapefile
     CROP = 'BANP'
     REGION = 'ecuador'
-    METRIC = 'HANPPharv' #'area' 'HANPPharv'
+    METRIC = 'area' #'area' 'HANPPharv'
     UNIT = 'km2' if METRIC == 'area' else 'tC'
 
     geodf = gpd.read_file(REGION_CONFIG[REGION]["path"])
     adm2_geodf = clean_region_shapefile(geodf, REGION)
     adm1_geodf = adm2_geodf.dissolve(by=['ADM0', 'ADM1'], as_index=False)
+
+    # --------------------------------------------------------
+    # GeoSnapshot of metric, no aggregation (raster within boundaries)
+    # --------------------------------------------------------
+    shapefile_kwargs = {'edgecolor': 'yellow', 'color': 'none',
+                        'linewidth': 0.3, 'linestyle': '--'}
+    YEAR = 2010
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    im, _ = plot_raster_within_shape(
+        raster_path = tif_raster_dict[CROP][METRIC][str(YEAR)],
+        gdf = adm2_geodf,
+        ax=ax)
+    fig.colorbar(im, ax=ax, label=f'{METRIC.capitalize()} value ({UNIT})')
+    ax.set_title(f'{CROP} {METRIC} in {REGION.capitalize()}, {YEAR}' + '\nRaster within Boundaries')
+
+    # Overlay shapefile boundaries
+    adm1_geodf.plot(ax=ax, **shapefile_kwargs)
+
+    plt.tight_layout()
+    plt.savefig(Path(FIGURE_PATH) / "LUIcube" / f"{REGION}_{CROP}_{METRIC}_raster_{YEAR}.png",
+                format='png', dpi=600)
+    plt.show()
 
     # --------------------------------------------------------
     # Here I build the csv with the metric aggregated at ADM2
@@ -445,24 +468,21 @@ if __name__ == "__main__":
                     dtype={'year': str})
 
     # --------------------------------------------------------
-    # Temporal evolution, metric aggregated at ADM0
+    # Temporal evolution, metric aggregated at ADM0, ADM1
     # --------------------------------------------------------
-    fig1, ax1 = plt.subplots(figsize=(12, 5))
-    plot_temporal_evolution(stats_df, METRIC, 'ADM0', ax1)
-    plt.tight_layout()
-    plt.close()
-    # --------------------------------------------------------
-    # Temporal evolution, metric aggregated at ADM1
-    # --------------------------------------------------------
-    fig2, ax2 = plt.subplots(figsize=(12, 5))
-    plot_temporal_evolution(stats_df, METRIC, 'ADM1', ax2)
-    plt.tight_layout()
-    plt.close()
+    for adm in ['ADM0', 'ADM1']:
+        fig, ax = plt.subplots(figsize=(12, 5))
+        plot_temporal_evolution(stats_df, METRIC, adm, ax)
+        plt.tight_layout()
+        plt.savefig(Path(FIGURE_PATH) / "LUIcube" / f"{REGION}_{CROP}_{METRIC}_temporal_evolution_{adm}.png",
+                    format='png', dpi=600)
+        plt.show()
 
     # --------------------------------------------------------
     # GeoSnapshot of metric, aggregated at ADM2
     # --------------------------------------------------------
-    YEAR = 2010
+    logging.info("Drawing ADM2-aggregated %s in %s", METRIC, YEAR)
+
     # Merge stats with polygons for the given year
     adm2_geogdf_plot = adm2_geodf.merge(stats_df[stats_df['year'] == str(YEAR)],
                                         how='outer')
@@ -471,10 +491,8 @@ if __name__ == "__main__":
     color_polygons_metric_in_year(adm2_geogdf_plot, YEAR, ax=ax3)
 
     # Internal borders
-    adm1_geodf.plot(color='none', edgecolor='yellow',
-                    linewidth=0.1, linestyle='--',
-                    ax=ax3)
+    adm1_geodf.plot(**shapefile_kwargs, ax=ax3)
     plt.tight_layout()
-    plt.savefig(FIGURE_PATH / f"{REGION}_ADM2_aggregated_{CROP}_{METRIC}_{YEAR}.png",
+    plt.savefig(FIGURE_PATH / "LUIcube" / f"{REGION}_{CROP}_{METRIC}_ADM2_aggregated_{YEAR}.png",
                 format='png', dpi=600)
     plt.show()

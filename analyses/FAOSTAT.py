@@ -136,12 +136,6 @@ def plot_fao_data(dict_dfs, years=None, figsize=(15, 10), save=False):
             ax.set_title(f"{crop} - {element}", fontsize=10)
             ax.grid(True, linestyle='--', lw=0.3)
 
-            if df.index.size > 30:
-                continue
-            else:
-                ax.set_xticks(df.index)
-                ax.set_xticklabels([str(int(t)) if t % 2 == 0 else '' for t in df.index],fontsize=8)
-
             # Label only first column with y-axis label
             if col_idx == 0:
                 ax.set_ylabel(df['Unit'].iloc[0] if 'Unit' in df.columns else 'Value')
@@ -149,6 +143,13 @@ def plot_fao_data(dict_dfs, years=None, figsize=(15, 10), save=False):
             # Label only last row with x-axis label
             if row_idx == len(crops) - 1:
                 ax.set_xlabel("Year")
+
+            if df.index.size > 30:
+                continue
+            else:
+                ax.set_xticks(df.index)
+                ax.set_xticklabels([str(int(t)) if t % 2 == 0 else '' for t in df.index],
+                                   rotation=90, fontsize=8)
 
     # After creating the figure and axes, connect the event
     fig.canvas.mpl_connect('button_press_event', onclick)
