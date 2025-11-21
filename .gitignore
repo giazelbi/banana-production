@@ -11,6 +11,7 @@ __pycache__/
 
 *.ipynb
 *.egg-info/
+!dev_PN_extraction_and_evaluation.ipynb
 
 .ipynb_checkpoints/
 **/.ipynb_checkpoints/
