@@ -156,7 +156,7 @@ def plot_fao_data(dict_dfs, years=None, figsize=(15, 10), save=False):
 
     plt.tight_layout()
     if save:
-        plt.savefig(FIGURE_PATH / "fao_data_plot.png")
+        plt.savefig(FIGURE_PATH / "FAOSTAT" / "banana_plantains_data_plot.png")
     plt.show()
 
 

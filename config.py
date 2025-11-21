@@ -24,7 +24,7 @@ REGION_CONFIG = {
     "austria": {
         "path": Path(DATA_PATH) / "geography" / "VGD_Oesterreich_gst_20230403" / "VGD.shp",
         "rename": {"ST": "ADM0", "BL": "ADM1", "PB": "ADM2"},
-        "filter": lambda df: df[df["ADM1"].isin(["Wien", "Niederösterreich"])],
+        "filter": lambda df: df,#[df["ADM1"].isin(["Wien", "Niederösterreich"])],
         "keep": ["ADM0", "ADM1", "ADM2", "geometry"],
     },
 }

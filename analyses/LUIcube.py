@@ -146,7 +146,8 @@ def plot_raster_within_shape(raster_path: str, gdf: gpd.GeoDataFrame, ax):
         # Coordinate reference system (e.g. EPSG:4326 = WGS84 lat/lon)
         # Reproject shapefile to match raster CRS
         # (required because raster and vector must share the same coordinate system)
-        gdf = gdf.to_crs(src.crs)
+        coord_ref_syst = src.crs
+        gdf = gdf.to_crs(coord_ref_syst)
 
         # Mask / clip raster to shapefile
         masked_data, transform = rasterio.mask.mask(
@@ -176,12 +177,14 @@ def plot_raster_within_shape(raster_path: str, gdf: gpd.GeoDataFrame, ax):
     # Calculate pixel sum and add textbox
     pixel_sum = np.nansum(masked_data[0])
     ax.text(
-        0.60, 0.1, f'Total: {pixel_sum:.3e}', transform=ax.transAxes,
+        #0.60, 0.1,
+        0.05, 0.7,
+        f'Total: {pixel_sum:.3e}', transform=ax.transAxes,
         fontsize=12, verticalalignment='top',
         bbox={'boxstyle':'round', 'facecolor':'white', 'alpha':0.8}
         )
 
-    return im, pixel_sum
+    return im, pixel_sum, coord_ref_syst
 
 # ----------------------------------------------------------------------------
 # Main plot function
@@ -421,9 +424,12 @@ if __name__ == "__main__":
     # Choose crop, metric, shapefile
     CROP = 'BANP'
     REGION = 'ecuador'
+    #CROP = 'VEFR'
+    #REGION = 'austria'
     METRIC = 'area' #'area' 'HANPPharv'
     UNIT = 'km2' if METRIC == 'area' else 'tC'
 
+    logging.info("Loading and dissolving shapefile")
     geodf = gpd.read_file(REGION_CONFIG[REGION]["path"])
     adm2_geodf = clean_region_shapefile(geodf, REGION)
     adm1_geodf = adm2_geodf.dissolve(by=['ADM0', 'ADM1'], as_index=False)
@@ -431,10 +437,10 @@ if __name__ == "__main__":
     # --------------------------------------------------------
     # GeoSnapshot of metric, no aggregation (raster within boundaries)
     # --------------------------------------------------------
+    logging.info("Plotting raster")
     shapefile_kwargs = {'edgecolor': 'yellow', 'color': 'none',
                         'linewidth': 0.3, 'linestyle': '--'}
-    YEAR = 2010
-
+    YEAR = 2020
     fig, ax = plt.subplots(figsize=(6, 6))
     im, _ = plot_raster_within_shape(
         raster_path = tif_raster_dict[CROP][METRIC][str(YEAR)],
@@ -444,7 +450,8 @@ if __name__ == "__main__":
     ax.set_title(f'{CROP} {METRIC} in {REGION.capitalize()}, {YEAR}' + '\nRaster within Boundaries')
 
     # Overlay shapefile boundaries
-    adm1_geodf.plot(ax=ax, **shapefile_kwargs)
+    adm1_geodf.plot(ax=ax, **{'edgecolor': 'yellow', 'color': 'none', 'linewidth': 0.3, 'linestyle': '-'})
+    adm2_geodf.plot(ax=ax, **{'edgecolor': 'orange', 'color': 'none', 'linewidth': 0.1, 'linestyle': '--'})
 
     plt.tight_layout()
     plt.savefig(Path(FIGURE_PATH) / "LUIcube" / f"{REGION}_{CROP}_{METRIC}_raster_{YEAR}.png",
@@ -454,7 +461,7 @@ if __name__ == "__main__":
     # --------------------------------------------------------
     # Here I build the csv with the metric aggregated at ADM2
     # --------------------------------------------------------
-
+    logging.info("Extracting temporal stats")
     extract_temporal_zonal_stats(tif_raster_dict,
                                  adm2_geodf,
                                  REGION, CROP, metrics=[METRIC],

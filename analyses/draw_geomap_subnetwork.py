@@ -2,14 +2,8 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-from pathlib import Path
-from config import REGION_CONFIG, clean_region_shapefile, DATA_PATH, FIGURE_PATH
-
-# ============================ Config ================================
-SECTOR = "A0122"          # Example: 'A0122' or ''
-CONTR_TYPE = "all"        # 'personas', 'sociedades', or 'all'
-YEAR = 2015
-LOGSCALE = True
+from tests.VAT import load_firm_data_sector
+from config import REGION_CONFIG, clean_region_shapefile, FIGURE_PATH
 
 # ============================ Load Data =============================
 def load_shapefiles():
@@ -22,121 +16,147 @@ def load_shapefiles():
     return adm1_geodf, adm2_geodf
 
 
-def load_firm_data(year=None, contr_type='all', sector='A0122'):
-    """
-    Load firm-level data for the given sector, contributor type, and year, returning a DataFrame.
-    """
-    filepath = Path(DATA_PATH) / f"firm-level/nodelist_{sector}{contr_type}.csv"
-    if not Path(filepath).exists():
-        raise FileNotFoundError(f"File not found: {filepath}")
-
-    firms_df = pd.read_csv(filepath, sep='\t',
-                           dtype={'firm_id': str, 'date': int, "out_strength": float})
-
-    # filter year
-    if year:
-        firms_df = firms_df[firms_df["date"] == year]
-    # filter contributor type
-    if contr_type == 'personas':
-        name_contr = 'Personas naturales'
-    elif contr_type == 'sociedades':
-        name_contr = 'Sociedades'
-    else:
-        name_contr = 'all'
-    if contr_type and contr_type != 'all':
-        firms_df = firms_df[firms_df["descrip_1"] == name_contr]
-    # filter sector
-    if sector:
-        firms_df = firms_df[firms_df["ISIC4"] == sector] 
-    return firms_df.rename({'province': 'ADM1', 'canton': 'ADM2'}, axis=1)
-
-
 # ============================ Processing ============================
-def aggregate_firm_data(firms_df, adm2_geodf):
-    """Aggregate firm counts and revenue by canton and merge with ADM2 shapefile."""
-    agg_df = (firms_df.groupby(["date", "ADM1", "ADM2"], as_index=False)
-                    .agg(counts=('firm_id', 'size'),
-                         cuml_s_out=('cw_s_out', 'sum')))
+def aggregate_firm_data(data_df, adm2_geodf, agg_col, agg_func):
+    """
+    Aggregate firms data by canton and merge with ADM2 (canton) shapefile.
+    """
+    agg_df = (data_df.groupby(["date", "ADM1", "ADM2"], as_index=False)
+                     .agg({agg_col : agg_func}))
 
     # Merge with shapefile
     return adm2_geodf.merge(agg_df, how='outer')
 
 
 # ============================ Plotting ==============================
-def plot_heatmaps(adm2_data_geodf, adm1_geodf, year, sector, contr_type):
+def plot_firmdata_heatmap(ax,
+                          firm_geodata_df,
+                          agg_col,
+                          logscale,
+                          adm1_boundaries,
+                          textbox,
+                          cmap="viridis"):
     """
-    Plot canton-level heatmaps of firm density and revenue, optionally using log-scaled bins.
+    Plot a canton-level heatmap for a firm data column.
     """
-    text_box = [
-        ('Total count:   ', int(adm2_data_geodf["counts"].sum())),
-        ('Total out str: ', format(adm2_data_geodf["cuml_s_out"].sum(), ".2e"))
-    ]
+    values = firm_geodata_df[agg_col].replace(0, np.nan)
+    total = firm_geodata_df[agg_col].sum()
+    if agg_col == 'cw_s_out':
+        total = str(round(total /1e9,2)) + ' B$'
+    if agg_col == 'firm_id':
+        total = int(total)
 
-    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(14, 7))
+    # Optional log binning
+    if logscale and not values.empty:
+        bins = np.logspace(np.log10(values.min()), np.log10(values.max()), num=7)
+        bins[-1] *= 1 + 1e-12  # ensure upper inclusion
+        labels = [f"{bins[j]:.1e} - {bins[j+1]:.1e}" for j in range(len(bins)-1)]
+        firm_geodata_df[f"{agg_col}_binned"] = pd.cut(values, bins=bins, labels=labels,
+                                                      include_lowest=True)
+        plot_col = f"{agg_col}_binned"
+    else:
+        plot_col = agg_col
 
-    for i, col in enumerate(["counts", "cuml_s_out"]):
-        data = adm2_data_geodf[col].replace(0, np.nan)
-        print(data)
-        if LOGSCALE and not data.empty:
-            adm2_data_geodf.loc[data.index, f"log_{col}"] = np.log10(data)
-            bins = np.logspace(np.log10(data.min()), np.log10(data.max()), num=7)
-            labels = [f"{bins[j]:.1e} - {bins[j+1]:.1e}" for j in range(len(bins)-1)]
-            adm2_data_geodf[f"{col}_binned"] = pd.cut(data, bins=bins,
-                                                      labels=labels, include_lowest=True)
-            plot_col = f"{col}_binned"
-        else:
-            plot_col = col
+    # Draw main heatmap
+    firm_geodata_df.plot(
+        column=plot_col,
+        cmap=cmap,
+        linewidth=0.3,
+        ax=ax,
+        edgecolor="black",
+        linestyle="--",
+        legend=True,
+        missing_kwds={"color": "lightgray", "label": "Zero"}
+    )
+    # Overlay ADM1 boundaries
+    adm1_boundaries.boundary.plot(ax=ax, edgecolor="black", linewidth=1)
 
-        # Plot canton-level heatmap
-        adm2_data_geodf.plot(
-            column=plot_col,
-            cmap="viridis",
-            linewidth=0.3,
-            ax=ax[i],
-            edgecolor="black",
-            linestyle="--",
-            legend=True,
-            missing_kwds={"color": "lightgray", "label": "Zero"}
-        )
-
-        # Overlay ADM1 boundaries
-        adm1_geodf.boundary.plot(ax=ax[i], edgecolor="black", linewidth=1)
-
-        # Add text box
-        ax[i].text(
-            0.475, 0.05,
-            f"Sector:        {sector}\n"
-            f"Contrib. type: {contr_type}\n{text_box[i][0]}{text_box[i][1]}",
-            transform=ax[i].transAxes,
-            fontsize=12,
-            family='monospace',
-            verticalalignment='bottom',
-            horizontalalignment='left',
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="black", alpha=0.8)
-        )
-        ax[i].axis("off")
-
-    ax[0].set_title(f"Tax contributor density ({year}) by canton\n"
-                    f" in continental Ecuador", fontsize=14)
-    ax[1].set_title(f"Tax contributor revenue ({year}) by canton\n"
+    # Add title
+    year = str(firm_geodata_df['date'].unique()[0])
+    ax.set_title(f"Tax contributor {agg_col} ({year}) by canton\n"
                     f" in continental Ecuador", fontsize=14)
 
-    FIGURE_PATH.mkdir(parents=True, exist_ok=True)
-    plt.savefig(FIGURE_PATH / f"geolocated_{year}_{sector}{contr_type}.png", format="png", dpi=600)
-    plt.show()
+    # Add text box
+    ax.text(
+        0.475, 0.05,
+        f"Sector:        {textbox['sector']}\n"
+        f"Contrib. type: {textbox['contrib']}\n"
+        f"Total {agg_col}: {total}",
+        transform=ax.transAxes,
+        fontsize=12,
+        family='monospace',
+        verticalalignment='bottom',
+        horizontalalignment='left',
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="black", alpha=0.8)
+    )
+    ax.axis("off")
 
 
-# ============================ Main ================================
-def draw_geomap_subnetwork(sector=SECTOR, contr_type=CONTR_TYPE,
-                           year=YEAR, logscale=LOGSCALE):
-    print(f"Drawing heatmap for {sector} {contr_type} firms in Ecuador ({year})")
-    print(f"Log scale: {logscale}")
+def canton_aggregated_count_and_column(firm_data_df,
+                                       adm2_geodf, adm1_geodf, logscale,
+                                       year, sector=None, contrib=None,
+                                       col_fun1 = ('cw_s_out', 'sum'),
+                                       save=False, figsize=(14, 7)):
+    """
+    Aggregate firm data at ADM2 level and plot count and value heatmaps.
+    """
 
-    adm1_geodf, adm2_geodf = load_shapefiles()
-    firms_df = load_firm_data(year=year, contr_type=contr_type, sector=sector)
-    adm2_data_geodf = aggregate_firm_data(firms_df, adm2_geodf)
-    plot_heatmaps(adm2_data_geodf, adm1_geodf, year, sector, contr_type)
+    # Textbox in the bottom of the ax
+    if not sector: sector=''
+    if not contrib: contrib=''
+    textbox = {'sector':sector, 'contrib':contrib}
+
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=figsize)
+
+    # ax 0
+    # Aggregate firm column data at the ADM2 level.
+    col_fun = ('firm_id', 'size')
+    adm2_data_geodf = aggregate_firm_data(firm_data_df, adm2_geodf, col_fun[0], col_fun[1])
+
+    # Plot column data in each canton
+    plot_firmdata_heatmap(ax[0], adm2_data_geodf, col_fun[0], logscale,
+                        adm1_geodf, textbox=textbox)
+
+
+    # ax 1
+    # Aggregate firm column data at the ADM2 level.
+    adm2_data_geodf = aggregate_firm_data(firm_data_df, adm2_geodf, col_fun1[0], col_fun1[1])
+
+    # Plot column data in each canton
+    plot_firmdata_heatmap(ax[1], adm2_data_geodf, col_fun1[0], logscale,
+                        adm1_geodf, textbox=textbox)
+
+    if save:
+        FIGURE_PATH.mkdir(parents=True, exist_ok=True)
+        plt.savefig(FIGURE_PATH / "VAT" / f"geolocated_{year}_{sector}{contrib}.png",
+                    format="png", dpi=600)
+    fig.show()
 
 
 if __name__ == "__main__":
-    draw_geomap_subnetwork()
+    SECTOR = "A0122"
+    YEAR = 2015
+    LOGSCALE = True
+
+    # Load shapefiles for Ecuador
+    adm1_geodf, adm2_geodf = load_shapefiles()
+
+    # Preload once
+    firms_df = load_firm_data_sector(year=YEAR, contr_type='all', sector=SECTOR)
+
+    for CONTR_TYPE in ['all', 'Personas naturales', 'Sociedades']:
+
+        # Filtering firms
+        if CONTR_TYPE != 'all':
+            df = firms_df[firms_df['descrip_1'] == CONTR_TYPE].copy()
+        else:
+            df = firms_df.copy()
+
+        print(f"Drawing heatmaps for {SECTOR} {CONTR_TYPE} firms in Ecuador ({YEAR})")
+        print(f"Log scale: {LOGSCALE}")
+
+        canton_aggregated_count_and_column(df,
+                                       YEAR, SECTOR, CONTR_TYPE,
+                                       adm2_geodf, adm1_geodf, LOGSCALE,
+                                       col_fun1 = ('cw_s_out', 'sum'),
+                                       save=False)

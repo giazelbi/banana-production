@@ -2,6 +2,7 @@
 data/
 to_be_updated/
 figures/
+*.graphml
 
 __pycache__/
 **/__pycache__/
