@@ -177,8 +177,8 @@ def plot_raster_within_shape(raster_path: str, gdf: gpd.GeoDataFrame, ax):
     # Calculate pixel sum and add textbox
     pixel_sum = np.nansum(masked_data[0])
     ax.text(
-        #0.60, 0.1,
-        0.05, 0.7,
+        0.60, 0.1,
+        #0.05, 0.7,
         f'Total: {pixel_sum:.3e}', transform=ax.transAxes,
         fontsize=12, verticalalignment='top',
         bbox={'boxstyle':'round', 'facecolor':'white', 'alpha':0.8}
@@ -438,9 +438,10 @@ if __name__ == "__main__":
     # GeoSnapshot of metric, no aggregation (raster within boundaries)
     # --------------------------------------------------------
     logging.info("Plotting raster")
-    shapefile_kwargs = {'edgecolor': 'yellow', 'color': 'none',
-                        'linewidth': 0.3, 'linestyle': '--'}
-    YEAR = 2020
+    shapefile_kwargs = {'edgecolor': 'red', 'color': 'none',
+                        'linewidth': 0.3, 'linestyle': '-'}
+    YEAR = 2015
+    """
     fig, ax = plt.subplots(figsize=(6, 6))
     im, _ = plot_raster_within_shape(
         raster_path = tif_raster_dict[CROP][METRIC][str(YEAR)],
@@ -457,7 +458,7 @@ if __name__ == "__main__":
     plt.savefig(Path(FIGURE_PATH) / "LUIcube" / f"{REGION}_{CROP}_{METRIC}_raster_{YEAR}.png",
                 format='png', dpi=600)
     plt.show()
-
+    """
     # --------------------------------------------------------
     # Here I build the csv with the metric aggregated at ADM2
     # --------------------------------------------------------
@@ -499,6 +500,8 @@ if __name__ == "__main__":
 
     # Internal borders
     adm1_geodf.plot(**shapefile_kwargs, ax=ax3)
+    ax3.set_axis_off()
+
     plt.tight_layout()
     plt.savefig(FIGURE_PATH / "LUIcube" / f"{REGION}_{CROP}_{METRIC}_ADM2_aggregated_{YEAR}.png",
                 format='png', dpi=600)

@@ -41,7 +41,7 @@ def plot_firmdata_heatmap(ax,
     """
     values = firm_geodata_df[agg_col].replace(0, np.nan)
     total = firm_geodata_df[agg_col].sum()
-    if agg_col == 'cw_s_out':
+    if total > 500000: # Temporary distintion between strength and count...
         total = str(round(total /1e9,2)) + ' B$'
     if agg_col == 'firm_id':
         total = int(total)

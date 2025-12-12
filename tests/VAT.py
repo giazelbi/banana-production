@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -233,7 +234,7 @@ def recalculate_strengths_from_links(firm_register_df, links_records_df, prefix=
 
     return result_df
 
-def compute_io_table_sector_level(links_df, isic_lev = 4):
+def compute_io_table_sector_level(links_df, isic_lev = 4, verbose=False):
     """
     Computes a sector-level Input-Output (IO) table from firm-level link data.
 
@@ -276,13 +277,13 @@ def compute_io_table_sector_level(links_df, isic_lev = 4):
     
 
     # ------------------ Pivot the data into a matrix form suitable for imshow
-    pivot = result_df.pivot(index="sector_customer", columns="sector_supplier", values="weight").fillna(0)
-
+    pivot = result_df.pivot(index="sector_supplier", columns="sector_customer", values="weight").fillna(0)
+    if verbose: print('(row i, col j) = (sector_supplier, sector_customer)')
     # Replace zeros with NaN
     pivot = pivot.replace(0, np.nan)
     return pivot
 
-def plot_io_pivottable(pivot, logscale):
+def plot_io_pivottable(pivot, logscale, xlabel=None, ylabel=None):
     # Extract axis labels and matrix
     x_labels = pivot.columns
     y_labels = pivot.index
@@ -302,18 +303,95 @@ def plot_io_pivottable(pivot, logscale):
     ax.set_yticks(np.arange(len(y_labels)))
     ax.set_xticklabels(x_labels, rotation=45, ha="right", rotation_mode="anchor")
     ax.set_yticklabels(y_labels)
+    if xlabel: ax.set_xlabel(xlabel)
+    if ylabel: ax.set_ylabel(ylabel)
 
     # Annotate each cell with the value
     for i in range(len(y_labels)):
         for j in range(len(x_labels)):
             val = data_matrix[i, j]
             if not np.isnan(val):
-                ax.text(j, i, f"{val:.1f}", ha="center", va="center", color="w")
+                if logscale:
+                    ax.text(j, i, f"{val:.1f}", ha="center", va="center", color="w")
+                else:
+                    ax.text(j, i, f"{val:.1e}", ha="center", va="center", color="w")
 
     ax.set_title("I/O table")
     fig.colorbar(im, ax=ax)
     fig.tight_layout()
     plt.show()
+
+def split_and_aggregate_edgelist(cw_edgelist: pd.DataFrame,
+                                 firm_PN_IDs: set):
+    """
+    Split cw_edgelist into three subsets (PN-PN, PN–RoE, RoE-only),
+    compute an aggregated RoE row, and return the combined global edgelist.
+
+    Parameters
+    ----------
+    cw_edgelist : pd.DataFrame
+        Input edgelist (countrywide) containing id_supplier, id_customer, and weight.
+    firm_PN_IDs : set
+        Set of firm IDs considered part of the PN.
+
+    Returns
+    -------
+    global_edgelist : pd.DataFrame
+        Combined DataFrame of PN, PN+RoE, and aggregated RoE-only links.
+    pn_edgelist : pd.DataFrame
+    pn_and_roe_edgelist : pd.DataFrame
+    roe_edgelist : pd.DataFrame
+    """
+    year = cw_edgelist['date'].unique()[0]
+
+    # Identify PN membership
+    in_sup = cw_edgelist['id_supplier'].isin(firm_PN_IDs)
+    in_cus = cw_edgelist['id_customer'].isin(firm_PN_IDs)
+
+    cw_edgelist = cw_edgelist.copy()
+    cw_edgelist['inPN_supplier'] = in_sup
+    cw_edgelist['inPN_customer'] = in_cus
+
+    # Split indices
+    idx_both = cw_edgelist.index[in_sup & in_cus]       # PN → PN
+    idx_one  = cw_edgelist.index[in_sup ^ in_cus]       # PN ↔ RoE (XOR)
+    idx_none = cw_edgelist.index[~in_sup & ~in_cus]     # RoE → RoE
+
+    # Subsets
+    pn_edgelist = cw_edgelist.loc[idx_both]
+    pn_and_roe_edgelist = cw_edgelist.loc[idx_one]
+    roe_edgelist = cw_edgelist.loc[idx_none]
+
+    print("Firm-level PN link count:", pn_edgelist.shape[0])
+    print("Firm-level PN link to and from Ecuador count:", pn_and_roe_edgelist.shape[0])
+
+    # Aggregated RoE row
+    aggregated_row = {
+        'id_supplier': 'RoE_supplier',
+        'id_customer': 'RoE_customer',
+        'weight': roe_edgelist['weight'].sum(),
+
+        'date': year,
+
+        'sector_supplier': np.nan,
+        'sector_customer': np.nan,
+        'ADM_supplier': np.nan,
+        'ADM_customer': np.nan,
+
+        'inPN_supplier': False,
+        'inPN_customer': False,
+    }
+
+    roe_aggregated = pd.DataFrame([aggregated_row])
+
+    # Combine all parts
+    global_edgelist = pd.concat(
+        [pn_edgelist, pn_and_roe_edgelist, roe_aggregated],
+        ignore_index=True
+    )
+
+    return global_edgelist, pn_edgelist, pn_and_roe_edgelist, roe_edgelist
+
 
 if __name__ == "__main__":
 
