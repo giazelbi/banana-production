@@ -72,8 +72,8 @@ def plot_firmdata_heatmap(ax,
     adm1_boundaries.boundary.plot(ax=ax, edgecolor="black", linewidth=1)
 
     # Add title
-    year = str(firm_geodata_df['date'].unique()[0])
-    ax.set_title(f"Tax contributor {agg_col} ({year}) by canton\n"
+    year = str(int(float(firm_geodata_df['date'].unique()[0])))
+    ax.set_title(f"Tax contributor {agg_col} ({str(int(year))}) by canton\n"
                     f" in continental Ecuador", fontsize=14)
 
     # Add text box
@@ -130,6 +130,7 @@ def canton_aggregated_count_and_column(firm_data_df,
         FIGURE_PATH.mkdir(parents=True, exist_ok=True)
         plt.savefig(FIGURE_PATH / "VAT" / f"geolocated_{year}_{sector}{contrib}.png",
                     format="png", dpi=600)
+    plt.tight_layout()
     fig.show()
 
 
