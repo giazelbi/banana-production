@@ -12,7 +12,7 @@ __pycache__/
 *.ipynb
 *.egg-info/
 !dev_PN_extraction_and_evaluation.ipynb
-!PN_validation.ipynb
+!PN_extraction.ipynb
 !PN_validation.ipynb
 
 .ipynb_checkpoints/
