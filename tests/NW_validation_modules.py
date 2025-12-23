@@ -7,13 +7,16 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import plotly.graph_objects as go
 from config import DATA_PATH, FIGURE_PATH
-from tests.visual_flow_diagram_helpers import (map_edge_ends_into_visual_nodes,
+from tests.visual_flow_diagram_helpers import (map_edge_ends_into_sankey_nodes,
                                                compute_total_unique_firms_per_visual_node,
-                                               aggregate_flows, hide_roe_to_roe, hide_repayment,
+                                               aggregate_flows_between_sankey_nodes,
+                                               hide_roe_to_roe, hide_repayment,
                                                hide_all_roe_edges,
-                                               hide_tiny_edges, compute_aggregated_node_attrs,
+                                               hide_tiny_edges,
+                                               aggregate_firm_data,
                                                extract_visible_nodes, create_node_index_mapping,
-                                               enrich_nodes_with_firm_data,
+                                               enrich_nodes_with_flow_data,
+                                               calculate_strength_captured_in_pn,
                                                set_custom_node_positions,
                                                build_visible_flows_with_indices,
                                                calculate_visible_flow_strengths,
@@ -324,7 +327,7 @@ def plot_stacked_bar_comparison(pivot_1, pivot_2, sector, column_color):
             percentage = (height / year_total) * 100 if year_total > 0 else 0
             if percentage >= perc:
                 ax.text(year + offset, cumulative_height + height/2, f'{int(percentage)}%',
-                       ha='center', va='center', fontsize=8, color='black', 
+                       ha='center', va='center', fontsize=8, color='black',
                        weight='bold', rotation=rotation)
             cumulative_height += height
 
@@ -371,7 +374,7 @@ def plot_stacked_bar(pivot, column_color, title_descr=None):
             percentage = (height / year_total) * 100 if year_total > 0 else 0
             if percentage >= 3:
                 ax.text(year, cumulative_height + height/2, f'{int(percentage)}%',
-                       ha='center', va='center', fontsize=8, color='black', 
+                       ha='center', va='center', fontsize=8, color='black',
                        weight='bold')
             cumulative_height += height
 
@@ -394,7 +397,8 @@ def plot_stacked_bar(pivot, column_color, title_descr=None):
 # =========================================================
 # Sankey diagram of production network flows
 # =========================================================
-def derive_visualization_data(global_edgelist, firm_PN_visual_IDs: set,
+def derive_visualization_data(global_edgelist, not_aggregated_IDs: set,
+                              firm_data_df,
                               ID_TO_SECTOR, SECTOR_TO_DESCR, ID_TO_ADM,
                               sector_color_map=None,
                               show_roe=True):
@@ -404,70 +408,75 @@ def derive_visualization_data(global_edgelist, firm_PN_visual_IDs: set,
     """
 
     # ---------------------------------------------------------
-    # Reduce PN system edgelist into visualization edgelist
+    # Represent PN edgelist into Sankey flows
     # ---------------------------------------------------------
     # Map edgelist ends into their visualization node.
-    visual_flows_df = map_edge_ends_into_visual_nodes(global_edgelist, firm_PN_visual_IDs)
+    system_flows_df = global_edgelist
+    system_flows_df, sankey_nodes_set = map_edge_ends_into_sankey_nodes(system_flows_df, not_aggregated_IDs)
 
     # Count firms in each visualization node (1 if IDs, many if sector)
-    firm_counts_per_visual_node_df = compute_total_unique_firms_per_visual_node(visual_flows_df)
+    firm_counts_per_visual_node_df = compute_total_unique_firms_per_visual_node(system_flows_df)
 
     # Now aggregate global edgelist into flows between visualization diagram nodes
-    visual_flows_df = aggregate_flows(visual_flows_df)
+    aggr_flows_df = aggregate_flows_between_sankey_nodes(
+        system_flows_df[['sankey_supplier', 'sankey_customer', 'weight', 'id_supplier', 'id_customer']])
 
-    # Hide messy flows
-    visual_flows_df = hide_roe_to_roe(visual_flows_df)
-    visual_flows_df = hide_repayment(visual_flows_df, factor=10)
-    if not show_roe:
-        visual_flows_df = hide_all_roe_edges(visual_flows_df)
+    # Hide messy flows and flows to RoE.
+    aggr_flows_df = hide_roe_to_roe(aggr_flows_df)
+    aggr_flows_df = hide_repayment(aggr_flows_df, factor=10)
+    if not show_roe: aggr_flows_df = hide_all_roe_edges(aggr_flows_df)
+    mask = (aggr_flows_df['sankey_customer'] == 'RoE_customer') & (aggr_flows_df['sankey_supplier'] == 'G4630')
+    mask = (aggr_flows_df['sankey_supplier'] == 'RoE_supplier') & (aggr_flows_df['sankey_customer'] == 'G4630') # Why do we hide it??
+    mask = (aggr_flows_df['sankey_customer'] == 'RoE_customer') & (aggr_flows_df['sankey_supplier'] == 'G4669')
+    #aggr_flows_df.loc[mask, 'visible'] = False
 
-    # Hide flows to RoE
-    mask = (visual_flows_df['vis_customer'] == 'RoE_customer') & (visual_flows_df['vis_supplier'] == 'G4630')
-    #visual_flows_df.loc[mask, 'visible'] = False
-    mask = (visual_flows_df['vis_supplier'] == 'RoE_supplier') & (visual_flows_df['vis_customer'] == 'G4630') # Why do we hide it??
-    #visual_flows_df.loc[mask, 'visible'] = False
-    mask = (visual_flows_df['vis_customer'] == 'RoE_customer') & (visual_flows_df['vis_supplier'] == 'G4669')
-    #visual_flows_df.loc[mask, 'visible'] = False
-
-    visual_flows_df = hide_tiny_edges(visual_flows_df, 0.02)
+    aggr_flows_df = hide_tiny_edges(aggr_flows_df, 0.02)
 
 
     # ---------------------------------------------------------
-    # Build visualization diagram nodes and links dataframes
+    # Build sankey nodes and links dataframes
     # ---------------------------------------------------------
-    # Compute node attributes from full aggregated data
-    nodes_df = compute_aggregated_node_attrs(visual_flows_df, ID_TO_SECTOR, SECTOR_TO_DESCR, ID_TO_ADM)
 
     # Step 1: Extract visible nodes
-    visible_nodes_df = extract_visible_nodes(visual_flows_df)
+    #sankey_nodes_df = extract_visible_nodes(aggr_flows_df) # MAYBE I REMOVE
+    mask = aggr_flows_df['visible'] == True
+    sankey_node_set = pd.concat([aggr_flows_df.loc[mask, 'sankey_supplier'],
+                                 aggr_flows_df.loc[mask, 'sankey_customer']]).unique()
+    sankey_nodes_df = pd.DataFrame({'sankey_node_label' : sankey_node_set, 'x':None, 'y': None})
 
     # Step 2: Create index mapping
-    visible_nodes_df, label_to_idx = create_node_index_mapping(visible_nodes_df)
+    sankey_nodes_df, label_to_idx = create_node_index_mapping(sankey_nodes_df)
 
-    # Step 3: Enrich with firm data
-    visible_nodes_df = enrich_nodes_with_firm_data(visible_nodes_df, nodes_df)
+    # Instead of calculating strength from the system flows, I query firm data from nodelist
+    #nodes_df = compute_cw_strengths_of_sankey_nodes(aggr_flows_df, ID_TO_SECTOR, SECTOR_TO_DESCR, ID_TO_ADM)
+    nodes_df = aggregate_firm_data(firm_data_df, sankey_nodes_set)
+
+    # Step 3: Enrich sankey nodes with firm data
+    sankey_nodes_df = enrich_nodes_with_flow_data(sankey_nodes_df, nodes_df)
+    sankey_nodes_df = calculate_strength_captured_in_pn(sankey_nodes_df)
 
     # Step 4: Add firm counts in visualization node
-    visible_nodes_df = visible_nodes_df.merge(firm_counts_per_visual_node_df, how='left')
+    sankey_nodes_df = sankey_nodes_df.merge(firm_counts_per_visual_node_df, how='left')
 
     # Step 5: Set custom positions
-    visible_nodes_df = set_custom_node_positions(visible_nodes_df)
+    sankey_nodes_df = set_custom_node_positions(sankey_nodes_df)
 
     # Step 6: Build visible flows with indices
-    visible_flows_df = build_visible_flows_with_indices(visual_flows_df, label_to_idx)
+    sankey_flows_df = build_visible_flows_with_indices(aggr_flows_df, label_to_idx)
 
     # Step 7: Calculate visible flow strengths
-    visible_strengths = calculate_visible_flow_strengths(visible_flows_df)
-    visible_nodes_df = (visible_nodes_df.merge(visible_strengths, on='visual_node_label', how='left')
-                                        .fillna(0))
+    visible_flows_strengths = calculate_visible_flow_strengths(sankey_flows_df)
+    sankey_nodes_df = (sankey_nodes_df
+                       .merge(visible_flows_strengths, on='sankey_node_label', how='left')
+                       .fillna(0))
 
     # Step 8: Add visibility percentages
-    visible_nodes_df = add_visibility_percentages(visible_nodes_df)
+    sankey_nodes_df = add_visibility_percentages(sankey_nodes_df)
 
     if sector_color_map:
         # Step 9: Add node colors
-        visible_nodes_df['color'] = visible_nodes_df['ISIC4'].map(sector_color_map).fillna('black')
-    return visible_nodes_df, visible_flows_df
+        sankey_nodes_df['color'] = sankey_nodes_df['ISIC4'].map(sector_color_map).fillna('black')
+    return sankey_nodes_df, sankey_flows_df
 
 def plot_flows_sankey(visible_nodes_df, visible_flows_df):
     """
@@ -480,31 +489,38 @@ def plot_flows_sankey(visible_nodes_df, visible_flows_df):
     Returns:
     - fig: Plotly Figure object representing the Sankey diagram.
     """
-    customdata_nodes = visible_nodes_df[['ISIC4', 'ISIC4_descr',
-                                        'ADM',
-                                        'total_unique_firms',
-                                        's_in', 'vis_s_in_perc', 'vis_s_in',
-                                        's_out', 'vis_s_out_perc', 'vis_s_out',
-                                        ]].values
+    customdata_nodes = visible_nodes_df[[
+        'ISIC4', 'descrip_n4',
+        'ADM2', 'ADM1', 'total_unique_firms',
+        'pn_s_in', 'capt_cw_s_in_perc',
+        'cw_s_in', 'visible_cw_s_in_perc',
+        'pn_s_out', 'capt_cw_s_out_perc',
+        'cw_s_out', 'visible_cw_s_out_perc',
+        ]].values
 
-    customdata_flows = visible_flows_df[['vis_supplier', 'vis_customer','weight',
-                                    'trans_uni',
-                                    'supp_uni', 'cust_uni'
-                                    ]].values
+    customdata_flows = visible_flows_df[[
+        'sankey_supplier', 'sankey_customer','weight',
+        'trans_uni',
+        'supp_uni', 'cust_uni'
+        ]].values
 
     fig = go.Figure(go.Sankey(
         #arrangement = "fixed",
         node = {
-            "label": visible_nodes_df['visual_node_label'],
+            "label": visible_nodes_df['sankey_node_label'],
             "x": [val if val else val for val in visible_nodes_df['x'].values],
             "y": [val if val else val for val in visible_nodes_df['y'].values],
             "customdata": customdata_nodes,
             "hovertemplate": 
                 "<b>%{label}</b><br>" +
                 "ISIC4, descr: %{customdata[0]}, %{customdata[1]}<br>" +
-                "Canton, Region: %{customdata[2]} (# of firms: %{customdata[3]})<br>" +
-                "Costs (s-in): %{customdata[4]:.2e}$, visible: %{customdata[5]}%<br>" +
-                "Sales (s-out): %{customdata[7]:.2e}$, visible: %{customdata[8]}%<br>" +
+                "Canton, Region: (%{customdata[2]}, %{customdata[3]}) (# of firms: %{customdata[4]})<br>" +
+                "Costs (s-in):<br>" +
+                "- in PN %{customdata[5]:.2e}$, (%{customdata[6]}% of the countrywide) <br>" +
+                "- in cw %{customdata[7]:.2e}$ (visible: %{customdata[8]}%)<br>" +
+                "Sales (s-out):<br>" +
+                "- in PN %{customdata[9]:.2e}$ (%{customdata[10]}% of the countrywide)<br>" +
+                "- in cw %{customdata[11]:.2e}$ (visible: %{customdata[12]}%)<br>" +
                 "<extra></extra>" # this suppresses the second box
             },
         link = {

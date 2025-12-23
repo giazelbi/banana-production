@@ -13,7 +13,7 @@ from analyses.FAOSTAT import load_faostat_data
 from config import FIGURE_PATH
 
 
-def plot_tropical_fruit_production(filename: str="FAOSTAT_data_en_9-25-2025.csv"):
+def plot_tropical_fruit_production(filename: str="FAOSTAT_tropical_fruit_production.csv"):
     """
     Generate a two-panel stacked area chart of tropical fruit production.
 
@@ -109,7 +109,7 @@ def plot_tropical_fruit_production(filename: str="FAOSTAT_data_en_9-25-2025.csv"
 
 if __name__ == "__main__":
     # Example usage
-    figure = plot_tropical_fruit_production("FAOSTAT_data_en_9-25-2025.csv")
+    figure = plot_tropical_fruit_production("FAOSTAT_tropical_fruit_production.csv")
     figure.show(renderer="browser")
     figure.write_image(FIGURE_PATH / "FAOSTAT" / "tropical_fruit_production.png",
                        width=2000,

@@ -11,7 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from config import DATA_PATH, FIGURE_PATH
 
-def load_faostat_data(filename="FAOSTAT_data_en_8-12-2025.csv"):
+def load_faostat_data(filename="FAOSTAT_banana_production_area.csv"):
     """
     Load FAOSTAT CSV data into a pandas DataFrame.
     

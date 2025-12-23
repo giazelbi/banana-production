@@ -10,14 +10,14 @@ import numpy as np
 # ---------------------------------------------------------
 # ID validation
 # ---------------------------------------------------------
-def validate_ids(firm_PN_visual_IDs, firm_PN_IDs):
+def validate_ids(not_aggregated_IDs, firm_PN_IDs):
     """
     Validate that all visualization-level firm IDs exist in the
     full production network firm ID set.
 
     Parameters
     ----------
-        firm_PN_visual_IDs : iterable
+        not_aggregated_IDs : iterable
         IDs the user wants to include in the visualization.
         firm_PN_IDs : iterable
         Complete set of IDs available in the production network.
@@ -32,18 +32,18 @@ def validate_ids(firm_PN_visual_IDs, firm_PN_IDs):
         ValueError
         If one or more visualization IDs are not found in firm_PN_IDs.
     """
-    missing = set(firm_PN_visual_IDs) - set(firm_PN_IDs)
+    missing = set(not_aggregated_IDs) - set(firm_PN_IDs)
     if missing:
         raise ValueError(f"These IDs are not in prod. net. ID set: {missing}")
     return (
         "firm_visual_IDs is subset of firm_PN_IDs: "
-        f"{set(firm_PN_visual_IDs).issubset(firm_PN_IDs)}"
+        f"{set(not_aggregated_IDs).issubset(firm_PN_IDs)}"
     )
 
 # ---------------------------------------------------------
 # Node mapping helper
 # ---------------------------------------------------------
-def map_node(row, side, firm_PN_visual_IDs):
+def map_node(row, side, not_aggregated_IDs):
     """
     Map a supplier or customer to its visualization-level node label.
     
@@ -62,7 +62,7 @@ def map_node(row, side, firm_PN_visual_IDs):
     if not inPN:
         return f"RoE_{side}"
 
-    if firm_id in firm_PN_visual_IDs:
+    if firm_id in not_aggregated_IDs:
         return firm_id
 
     return sect
@@ -70,7 +70,7 @@ def map_node(row, side, firm_PN_visual_IDs):
 # ---------------------------------------------------------
 # Map all firms into visualization nodes
 # ---------------------------------------------------------
-def map_edge_ends_into_visual_nodes(df, firm_PN_visual_IDs):
+def map_edge_ends_into_sankey_nodes(df, not_aggregated_IDs):
     """
     Convert raw supplier/customer IDs into visualization-level node labels
     using `map_node`.
@@ -79,18 +79,19 @@ def map_edge_ends_into_visual_nodes(df, firm_PN_visual_IDs):
     ----------
         df : pd.DataFrame
         Input edgelist with id/sector/inPN columns.
-        firm_PN_visual_IDs : set
+        not_aggregated_IDs : set
         IDs that should appear as firm-level nodes.
 
     Returns
     -------
         pd.DataFrame
-        DataFrame with new columns 'vis_supplier' and 'vis_customer'.
+        DataFrame with new columns 'sankey_supplier' and 'sankey_customer'.
     """
     df = df.copy()
-    df["vis_supplier"] = df.apply(lambda r: map_node(r, "supplier", firm_PN_visual_IDs), axis=1)
-    df["vis_customer"] = df.apply(lambda r: map_node(r, "customer", firm_PN_visual_IDs), axis=1)
-    return df
+    df["sankey_supplier"] = df.apply(lambda r: map_node(r, "supplier", not_aggregated_IDs), axis=1)
+    df["sankey_customer"] = df.apply(lambda r: map_node(r, "customer", not_aggregated_IDs), axis=1)
+    vis_nodes_set = set(df['sankey_supplier']).union(set(df['sankey_customer']))
+    return df, vis_nodes_set
 
 # ---------------------------------------------------------
 # Remove RoE → RoE edges
@@ -102,7 +103,7 @@ def hide_roe_to_roe(df):
     Parameters
     ----------
         df : pd.DataFrame
-        Must contain 'vis_supplier', 'vis_customer', and 'visible'.
+        Must contain 'sankey_', 'sankey_customer', and 'visible'.
 
     Returns
     -------
@@ -111,8 +112,8 @@ def hide_roe_to_roe(df):
     """
     mask = (
         (df["visible"] == True) &
-        (df["vis_supplier"] == "RoE_supplier") &
-        (df["vis_customer"] == "RoE_customer")
+        (df["sankey_supplier"] == "RoE_supplier") &
+        (df["sankey_customer"] == "RoE_customer")
     )
     df.loc[mask, "visible"] = False
     return df
@@ -136,8 +137,8 @@ def hide_repayment(df, factor):
     ----------
     df : pd.DataFrame
         Must contain:
-        - 'vis_supplier'
-        - 'vis_customer'
+        - 'sankey_supplier'
+        - 'sankey_customer'
         - 'weight'
         - 'visible'
         factor : float
@@ -149,16 +150,16 @@ def hide_repayment(df, factor):
         DataFrame with updated visibility status.
     """
     reverse = (
-        df[df["visible"] == True][['vis_supplier', 'vis_customer', 'weight']]
+        df[df["visible"] == True][['sankey_supplier', 'sankey_customer', 'weight']]
         #.drop("visible", axis=1)
         .rename(columns={
-            "vis_supplier": "vis_customer",
-            "vis_customer": "vis_supplier",
+            "sankey_supplier": "sankey_customer",
+            "sankey_customer": "sankey_supplier",
             "weight": "reverse_weight",
         })
     )
 
-    merged = df.merge(reverse, on=["vis_supplier", "vis_customer"], how="left")
+    merged = df.merge(reverse, on=["sankey_supplier", "sankey_customer"], how="left")
 
     mask_update = merged["visible"] == True
     merged.loc[mask_update, "visible"] = (
@@ -209,8 +210,8 @@ def hide_all_roe_edges(df):
     ----------
     df : pd.DataFrame
         Must contain:
-        - 'vis_supplier'
-        - 'vis_customer'
+        - 'sankey_supplier'
+        - 'sankey_customer'
         - 'visible'
 
     Returns
@@ -222,8 +223,8 @@ def hide_all_roe_edges(df):
     mask = (
         (df["visible"] == True) &
         (
-            df["vis_supplier"].str.contains("RoE", case=False, regex=False) |
-            df["vis_customer"].str.contains("RoE", case=False, regex=False)
+            df["sankey_supplier"].str.contains("RoE", case=False, regex=False) |
+            df["sankey_customer"].str.contains("RoE", case=False, regex=False)
         )
     )
 
@@ -235,23 +236,23 @@ def hide_all_roe_edges(df):
 # ---------------------------------------------------------
 def compute_total_unique_firms_per_visual_node(df):
     """
-    Simpler: returns visual_node_label -> total_unique_firms (union of supplier & customer IDs).
+    Simpler: returns sankey_node_label -> total_unique_firms (union of supplier & customer IDs).
     """
-    sup = df[["id_supplier", "vis_supplier"]].drop_duplicates().rename(
-        columns={"id_supplier": "id", "vis_supplier": "visual_node_label"}
+    sup = df[["id_supplier", "sankey_supplier"]].drop_duplicates().rename(
+        columns={"id_supplier": "id", "sankey_supplier": "sankey_node_label"}
     )
-    cust = df[["id_customer", "vis_customer"]].drop_duplicates().rename(
-        columns={"id_customer": "id", "vis_customer": "visual_node_label"}
+    cust = df[["id_customer", "sankey_customer"]].drop_duplicates().rename(
+        columns={"id_customer": "id", "sankey_customer": "sankey_node_label"}
     )
 
-    union = pd.concat([sup, cust], ignore_index=True).drop_duplicates(subset=["id", "visual_node_label"])
+    union = pd.concat([sup, cust], ignore_index=True).drop_duplicates(subset=["id", "sankey_node_label"])
 
-    return union.groupby("visual_node_label", as_index=False)["id"].nunique().rename(columns={"id": "total_unique_firms"})
+    return union.groupby("sankey_node_label", as_index=False)["id"].nunique().rename(columns={"id": "total_unique_firms"})
 
 # ---------------------------------------------------------
 # Aggregate firm-level flows to the visualization nodes level
 # ---------------------------------------------------------
-def aggregate_flows(df):
+def aggregate_flows_between_sankey_nodes(df):
     """
     Aggregate transaction flows by visualization-level node pairs.
 
@@ -259,8 +260,8 @@ def aggregate_flows(df):
     ----------
         df : pd.DataFrame
         Must contain columns:
-        - 'vis_supplier'
-        - 'vis_customer'
+        - 'sankey_supplier'
+        - 'sankey_customer'
         - 'weight'
 
     Returns
@@ -269,8 +270,8 @@ def aggregate_flows(df):
         Aggregated flows with column 'visible' set to True.
     """
     df = (
-        df#[["weight", "vis_supplier", "vis_customer"]]
-        .groupby(["vis_supplier", "vis_customer"], as_index=False)
+        df#[["weight", "sankey_supplier", "sankey_customer"]]
+        .groupby(["sankey_supplier", "sankey_customer"], as_index=False)
         .agg(weight = ('weight','sum'),
              trans_uni = ('weight','count'),
              supp_uni = ('id_supplier', 'nunique'),
@@ -284,14 +285,14 @@ def aggregate_flows(df):
 # ---------------------------------------------------------
 # Compute attributes (s_in, adm) for the aggregated nodes
 # ---------------------------------------------------------
-def compute_aggregated_node_attrs(flows_df, ID_TO_SECTOR, SECTOR_TO_DESCR, ID_TO_ADM):
+def compute_cw_strengths_of_sankey_nodes(flows_df, ID_TO_SECTOR, SECTOR_TO_DESCR, ID_TO_ADM):
     """
     Calculate node-level metrics from edge list.
     
     Parameters
     ----------
     flows_df : pd.DataFrame
-        Edge list with columns: vis_supplier, vis_customer, weight
+        Edge list with columns: sankey_supplier, sankey_customer, weight
     ID_TO_SECTOR : dict
         Mapping from firm ID to ISIC4 sector
     SECTOR_TO_DESCR : dict
@@ -305,11 +306,11 @@ def compute_aggregated_node_attrs(flows_df, ID_TO_SECTOR, SECTOR_TO_DESCR, ID_TO
         Node-level dataframe with columns: firm, s_out, s_in, ISIC4, ISIC4_descr, ADM
     """
     # Calculate out-strength
-    out_strength = flows_df.groupby('vis_supplier')['weight'].sum().reset_index()
+    out_strength = flows_df.groupby('sankey_supplier')['weight'].sum().reset_index()
     out_strength.columns = ['firm', 's_out']
 
     # Calculate in-strength
-    in_strength = flows_df.groupby('vis_customer')['weight'].sum().reset_index()
+    in_strength = flows_df.groupby('sankey_customer')['weight'].sum().reset_index()
     in_strength.columns = ['firm', 's_in']
 
     # Merge
@@ -331,12 +332,12 @@ def extract_visible_nodes(flows_df):
     """
     visible_flows = flows_df[flows_df['visible'] == True]
     vis_nodes = pd.concat([
-        visible_flows['vis_supplier'],
-        visible_flows['vis_customer']
+        visible_flows['sankey_supplier'],
+        visible_flows['sankey_customer']
     ]).unique()
 
     return pd.DataFrame({
-        'visual_node_label': vis_nodes,
+        'sankey_node_label': vis_nodes,
         'x': None,
         'y': None
     })
@@ -348,21 +349,29 @@ def create_node_index_mapping(vis_nodes_df):
     """
     Create mapping from node labels to indices and add to dataframe.
     """
-    label_to_idx = {label: i for i, label in enumerate(vis_nodes_df['visual_node_label'])}
-    vis_nodes_df['idx'] = vis_nodes_df['visual_node_label'].map(label_to_idx)
+    label_to_idx = {label: i for i, label in enumerate(vis_nodes_df['sankey_node_label'])}
+    vis_nodes_df['idx'] = vis_nodes_df['sankey_node_label'].map(label_to_idx)
     return vis_nodes_df, label_to_idx
 
 # ---------------------------------------------------------
 # Add firm data to visible nodes dataframe
 # ---------------------------------------------------------
-def enrich_nodes_with_firm_data(vis_nodes_df, nodes_df):
+def enrich_nodes_with_flow_data(vis_nodes_df, nodes_df):
     """Merge firm information into visible nodes."""
     return vis_nodes_df.merge(
-        nodes_df.rename(columns={'firm': 'visual_node_label'}),
-        on='visual_node_label',
+        nodes_df.rename(columns={'firm': 'sankey_node_label'}),
+        on='sankey_node_label',
         how='left'
     )
 
+def calculate_strength_captured_in_pn(vis_nodes_df):
+    """Calculate what percentage of total strength is inside pn."""
+    vis_nodes_df['capt_cw_s_out_perc'] = (
+        100 * vis_nodes_df['pn_s_out'] / vis_nodes_df['cw_s_out']).round(1).fillna(0)
+
+    vis_nodes_df['capt_cw_s_in_perc'] = (
+        100 * vis_nodes_df['pn_s_in'] / vis_nodes_df['cw_s_in']).round(1).fillna(0)
+    return vis_nodes_df
 # ---------------------------------------------------------
 # Add custom positions to visible nodes fo the plot
 # ---------------------------------------------------------
@@ -395,7 +404,7 @@ def set_custom_node_positions(vis_nodes_df):
     }
 
     for node_label, (x, y) in position_map.items():
-        mask = vis_nodes_df['visual_node_label'] == node_label
+        mask = vis_nodes_df['sankey_node_label'] == node_label
         vis_nodes_df.loc[mask, ['x', 'y']] = (x, y)
 
     return vis_nodes_df
@@ -410,8 +419,8 @@ def build_visible_flows_with_indices(flows_df, label_to_idx):
     vis_flows_df = flows_df[flows_df['visible'] == True].copy()
 
     # Map node labels to indices
-    vis_flows_df['source_idx'] = vis_flows_df['vis_supplier'].map(label_to_idx)
-    vis_flows_df['target_idx'] = vis_flows_df['vis_customer'].map(label_to_idx)
+    vis_flows_df['source_idx'] = vis_flows_df['sankey_supplier'].map(label_to_idx)
+    vis_flows_df['target_idx'] = vis_flows_df['sankey_customer'].map(label_to_idx)
 
     # Calculate log weights for visualization
     vis_flows_df['log_weight'] = np.log10(vis_flows_df['weight'])
@@ -428,27 +437,46 @@ def calculate_visible_flow_strengths(vis_flows_df):
     Calculate in/out strengths from visible flows only.
     """
     # Outgoing strength from visible flows
-    vis_s_out = vis_flows_df.groupby('vis_supplier')['weight'].sum().reset_index()
-    vis_s_out.columns = ['visual_node_label', 'vis_s_out']
+    visible_s_out = vis_flows_df.groupby('sankey_supplier')['weight'].sum().reset_index()
+    visible_s_out.columns = ['sankey_node_label', 'visible_s_out']
 
     # Incoming strength from visible flows
-    vis_s_in = vis_flows_df.groupby('vis_customer')['weight'].sum().reset_index()
-    vis_s_in.columns = ['visual_node_label', 'vis_s_in']
+    visible_s_in = vis_flows_df.groupby('sankey_customer')['weight'].sum().reset_index()
+    visible_s_in.columns = ['sankey_node_label', 'visible_s_in']
 
     # Merge and fill missing values
-    return vis_s_out.merge(vis_s_in, on='visual_node_label', how='outer').fillna(0)
+    return visible_s_out.merge(visible_s_in, on='sankey_node_label', how='outer').fillna(0)
+
+def aggregate_firm_data(firm_data_df, sankey_nodes_set):
+    sankey_ids_df = (firm_data_df[firm_data_df['firm_id'].isin(sankey_nodes_set)]
+                        .rename({'firm_id':'sankey_node_label'}, axis=1))
+    sankey_aggregated_df = (firm_data_df.drop(sankey_ids_df.index)
+                        .groupby(['ISIC4', 'descrip_n4'])
+                        .agg({'cw_s_out': 'sum', # is cw_socied_&_pers_nat_s_out
+                            'cw_s_in': 'sum',
+                            'pn_s_in': 'sum',
+                            'pn_k_in': 'sum',
+                            'pn_s_out': 'sum',
+                            'pn_k_out': 'sum',
+                            'descrip_1': 'unique',
+                            'firm_id': 'nunique',
+                            'ADM2': 'nunique', 'ADM1': 'nunique'
+                            }).reset_index()
+                    )
+    sankey_aggregated_df['sankey_node_label'] = sankey_aggregated_df['ISIC4']
+    aggr_firm_data_df = pd.concat([sankey_ids_df, sankey_aggregated_df], join='inner')
+    return aggr_firm_data_df
 
 # ---------------------------------------------------------
 # Quantify visible data and add it visible nodes df
 # ---------------------------------------------------------
 def add_visibility_percentages(vis_nodes_df):
     """Calculate what percentage of total strength is visible."""
-    vis_nodes_df['vis_s_out_perc'] = (
-        100 * vis_nodes_df['vis_s_out'] / vis_nodes_df['s_out']).round(1).fillna(0)
+    vis_nodes_df['visible_cw_s_out_perc'] = (
+        100 * vis_nodes_df['visible_s_out'] / vis_nodes_df['cw_s_out']).round(1).fillna(0)
 
-    vis_nodes_df['vis_s_in_perc'] = (
-        100 * vis_nodes_df['vis_s_in'] / vis_nodes_df['s_in']).round(1).fillna(0)
-
+    vis_nodes_df['visible_cw_s_in_perc'] = (
+        100 * vis_nodes_df['visible_s_in'] / vis_nodes_df['cw_s_in']).round(1).fillna(0)
     return vis_nodes_df
 
 
@@ -459,7 +487,7 @@ def add_visibility_percentages(vis_nodes_df):
 """
 supplier_out = (
     visual_flows_df
-    .groupby("vis_supplier")["weight"]
+    .groupby("sankey_supplier")["weight"]
     .transform("sum")
 )
 
